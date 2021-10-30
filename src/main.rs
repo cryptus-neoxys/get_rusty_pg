@@ -1,68 +1,119 @@
-use core::panic;
 use std::{
-    fmt::Result,
-    fs::File,
-    io::{self, ErrorKind, Read},
-    num::IntErrorKind,
+    sync::{
+        mpsc::{self, Receiver},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
+    vec,
 };
 
-fn exit(code: Option<i32>) {
-    match code {
-        Some(0) => panic!("got 0, panicked"),
-        Some(x) => println!("Non-0: {}, no-exit", x),
-        None => println!("received nothing"),
-    }
+const NUM_TIMERS: usize = 24;
+
+fn timer(d: usize, tx: mpsc::Sender<usize>) {
+    thread::spawn(move || {
+        println!("{}: sending timer . . .", d);
+        thread::sleep(Duration::from_secs(d as u64));
+        println!("{}: sent!!!", d);
+        tx.send(d).unwrap();
+    });
 }
 
-fn read_file() -> io::Result<String> {
-    // Java-Like
-    // let f = File::open("text.txt");
+fn is_prime(n: usize) -> bool {
+    (2..n).all(|i| n % i != 0)
+}
 
-    // let mut f = match f {
-    //     Ok(file) => file,
-    //     Err(e) => return Err(e),
-    // };
+fn producer(tx: mpsc::SyncSender<usize>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for i in 100_000_000.. {
+            tx.send(i).unwrap();
+        }
+    })
+}
 
-    // let mut s = String::new();
-    // match f.read_to_string(&mut s) {
-    //     Ok(_) => Ok(s),
-    //     Err(e) => return Err(e),
-    // }
+fn worker(id: usize, shared_rx: Arc<Mutex<mpsc::Receiver<usize>>>) {
+    thread::spawn(move || loop {
+        {
+            let mut n = 0;
+            match shared_rx.lock() {
+                Ok(rx) => match rx.try_recv() {
+                    Ok(_n) => {
+                        n = _n;
+                    }
+                    Err(_) => (),
+                },
+                Err(_) => (),
+            }
 
-    // Rustik
-    // let mut f = File::open("text.txt")?;
-    // let mut s = String::new();
-    // f.read_to_string(&mut s)?;
-    // Ok(s)
-
-    // Optional Chaining: The Origin
-    let mut s = String::new();
-    File::open("text.txt")?.read_to_string(&mut s)?;
-    Ok(s)
+            if n != 0 {
+                if is_prime(n) {
+                    println!("worker {} found a prime: {}", id, n);
+                }
+            }
+        }
+    });
 }
 
 fn main() {
-    exit(Some(1));
-    exit(Some(10));
-    exit(None);
-    // exit(Some(0));
+    // // Thread spawn & join
+    // let mut c = vec![];
+    // for i in 0..10 {
+    //     c.push(thread::spawn(move || {
+    //         println!("thread number {}", i);
+    //     }));
+    // }
+    // for j in c {
+    //     j.join();
+    // }
 
-    // // Feels like Java
-    // let f = File::open("text.txt");
-    // let f = match f {
-    //     Ok(file) => file,
-    //     Err(ref err) if err.kind() == ErrorKind::NotFound => match File::create("text.txt") {
-    //         Ok(fc) => fc,
-    //         Err(e) => {
-    //             panic!("could not create file: {:?}", e)
-    //         }
-    //     },
-    //     Err(err) => {
-    //         panic!("could not open file: {:?}", err)
-    //     }
-    // };
+    // // `move` to take ownership of vars
+    // let v = vec![1, 2, 3];
+    // let handle = thread::spawn(move || {
+    //     println!("Vector {:?}", v);
+    // });
+    // handle.join();
 
-    // // More like rust
-    // let f = File::open("text.txt").expect("Unable to open file");
-    read_file().unwrap();
+    // // Channels [passing messages ~inter-thread~]
+    // let (tx, rx) = mpsc::channel();
+    // thread::spawn(move || {
+    //     tx.send(42).unwrap();
+    // });
+    // println!("got {}", rx.recv().unwrap());
+
+    // // Message Passing cont..
+    // let (tx, rx) = mpsc::channel();
+    // for i in 0..NUM_TIMERS {
+    //     timer(i, tx.clone());
+    // }
+    // for v in rx.iter().take(NUM_TIMERS) {
+    //     println!("{}: received", v);
+    // }
+
+    // // Mutexes and Arc
+    // let c = Arc::new(Mutex::new(0));
+    // let mut hs = vec![];
+
+    // for _ in 0..10 {
+    //     let c = Arc::clone(&c);
+    //     let h = thread::spawn(move || {
+    //         let mut num = c.lock().unwrap();
+
+    //         *num += 1;
+    //         println!("num: {}", num);
+    //     });
+    //     hs.push(h);
+    // }
+    // for h in hs {
+    //     h.join().unwrap();
+    // }
+    // println!("Result: {}", *c.lock().unwrap());
+
+    // oke... finding primes
+    let (tx, rx) = mpsc::sync_channel(1024);
+    let shared_rx = Arc::new(Mutex::new(rx));
+    for i in 1..5 {
+        worker(i, shared_rx.clone());
+    }
+
+    producer(tx).join().unwrap();
 }
