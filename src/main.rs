@@ -11,6 +11,18 @@ struct A<'a, 'b> {
     y: &'b str,
 }
 
+impl<'a, 'b> A<'a, 'b> {
+    fn slf(&self) -> &str {
+        self.x
+    }
+}
+
+fn ab<'a, 'b>(x: &'a str, y: &'b str) {}
+
+fn a<'a>(s: &'a str) -> &'a str {
+    s
+}
+
 fn main() {
     let x;
     // {
@@ -30,5 +42,10 @@ fn main() {
         x: "Hello",
         y: "There",
     };
-    println!("{} {}!", ast.x, ast.y)
+    println!("{} {}!", ast.x, ast.y);
+
+    println!("{}", ast.slf());
+
+    // Static lifetimes, last program
+    let st: &'static str = "Looooong";
 }
